@@ -1,72 +1,50 @@
 const net = require("net");
 const { parseRESP } = require("./protocol/parser");
 const { encode } = require("./protocol/encoder");
+const EventLoop = require("./eventLoop");
 
 const store = {};
-
-const clients = new Set()
+const buffers = new Map();
+const loop = new EventLoop();
 
 const server = net.createServer(socket => {
-    socket.setNoDelay(true);
-    socket.setEncoding("utf8");
-    clients.add(socket);
-    console.log("Client connected...");
+    console.log("Client connected");
+    buffers.set(socket, "");
 
-    socket.on("close", () => {
-        console.log("Client disconnected");
-        clients.delete(socket);
-    });
+    loop.onReadable(socket, () => {
+        socket.on("data", chunk => {
+            let buffer = buffers.get(socket) + chunk;
+            try {
+                const [cmd, ...args] = parseRESP(Buffer.from(buffer));
+                handleCommand(socket, cmd, args);
+                buffers.set(socket, "");
+            } catch {
+                buffers.set(socket, buffer);
+            }
+        });
 
-    socket.on("data", data => {
-            
+        socket.on("close", () => {
+            buffers.delete(socket);
+        });
     });
 });
+
+function handleCommand(socket, cmd, args) {
+    switch (cmd.toLowerCase()) {
+        case "set":
+            store[args[0]] = args[1];
+            socket.write(encode("OK"));
+            break;
+        case "get":
+            socket.write(encode(store[args[0]] || null));
+            break;
+        default:
+            socket.write(encode(new Error("Unknown command")));
+    }
+}
 
 server.listen(8000, () => {
     console.log("Custom Redis server running on port 8000");
+    loop.run();
 });
-
-function eventLoop() {
-    for (const socket of clients) {
-        let data;
-        try {
-            data = socket.read();
-        } catch {
-            continue;
-        }
-        if(!data) continue;
-
-        try {
-            const [cmd, ...reply] = parseRESP(Buffer.from(data));
-
-            switch (cmd.toLowerCase()) {
-                case "set": {
-                    const key = reply[0];
-                    const value = reply[1];
-                    store[key] = value;
-                    socket.write(encode("OK"));
-                    break;
-                }
-                case "get": {
-                    const key = reply[0];
-                    const value = store[key];
-                    if (value === undefined) {
-                        socket.write(encode(null));
-                    } else {
-                        socket.write(encode(value));
-                    }
-                    break;
-                }
-                default:
-                    socket.write(encode(new Error("Unknown command")));
-            }
-        } catch(err) {
-            socket.write(encode(err));
-        }
-    }
-
-    setImmediate(eventLoop)
-}
-
-setImmediate(eventLoop)
 
