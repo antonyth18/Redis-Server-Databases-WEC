@@ -55,6 +55,25 @@ class KVStore {
     this._buckets = Array(this._cap).fill(null);
     this._size = 0;
     this._maxLoad = 0.75;
+
+    setInterval(() => this._cleanupExpired(), 1000);
+  }
+
+  _cleanupExpired() {
+    for (const head of this._buckets) {
+      let prev = null;
+      let cur = head;
+      while (cur) {
+        if (cur.isExpired()) {
+          if (prev) prev.next = cur.next;
+          else this._buckets[this._indexForHash(cur.hash)] = cur.next;
+          this._size--;
+        } else {
+          prev = cur;
+        }
+        cur = cur.next;
+      }
+    }
   }
 
   _indexForHash(h) {
