@@ -1,7 +1,10 @@
-
 'use strict';
 
-const readline = require('readline');
+const fs = require('fs');
+const path = require('path');
+const { Worker } = require('worker_threads');
+
+const DUMP_FILE = path.join(__dirname, 'dump.json');
 
 function fnv1aHash(str) {
   let hash = 1469598103934665603n;
@@ -14,26 +17,7 @@ function fnv1aHash(str) {
   return Number(hash);
 }
 
-function patternMatch(pattern, text) {
-  let p = 0, t = 0, star = -1, match = 0;
-  while (t < text.length) {
-    if (p < pattern.length && (pattern[p] === text[t])) {
-      p++; t++;
-    } else if (p < pattern.length && pattern[p] === '*') {
-      star = p++;
-      match = t;
-    } else if (star !== -1) {
-      p = star + 1;
-      t = ++match;
-    } else {
-      return false;
-    }
-  }
-  while (p < pattern.length && pattern[p] === '*') p++;
-  return p === pattern.length;
-}
-
-// ---------------- Entry (linked list node) ----------------
+// ---------------- Entry ----------------
 class Entry {
   constructor(key, value, hash) {
     this.key = key;
@@ -48,7 +32,7 @@ class Entry {
   }
 }
 
-// ---------------- KVStore (hash table with separate chaining) ----------------
+// ---------------- KVStore ----------------
 class KVStore {
   constructor(initialCapacity = 16) {
     this._cap = Math.max(4, initialCapacity);
@@ -56,9 +40,67 @@ class KVStore {
     this._size = 0;
     this._maxLoad = 0.75;
 
+    this._loadFromDisk();
+
     setInterval(() => this._cleanupExpired(), 1000);
+
+    setInterval(() => this._persistAsync(), 5000);
   }
 
+  // ---------------- Persistence ----------------
+  _persistAsync() {
+    const data = {};
+    for (const head of this._buckets) {
+      let cur = head;
+      while (cur) {
+        if (!cur.isExpired()) {
+          data[cur.key] = {
+            value: cur.value,
+            expiry: cur.expiry,
+          };
+        }
+        cur = cur.next;
+      }
+    }
+
+    const worker = new Worker(
+      `
+      const { parentPort } = require('worker_threads');
+      const fs = require('fs');
+      parentPort.on('message', ({ file, data }) => {
+        fs.writeFile(file, JSON.stringify(data), err => {
+          if (err) console.error('Persistence error:', err);
+          parentPort.postMessage('done');
+        });
+      });
+      `,
+      { eval: true }
+    );
+
+    worker.postMessage({ file: DUMP_FILE, data });
+    worker.on('message', () => worker.terminate());
+  }
+
+  _loadFromDisk() {
+    if (!fs.existsSync(DUMP_FILE)) return;
+    try {
+      const raw = fs.readFileSync(DUMP_FILE, 'utf-8');
+      const obj = JSON.parse(raw);
+      for (const k in obj) {
+        const e = obj[k];
+        const entry = new Entry(k, e.value, fnv1aHash(k));
+        entry.expiry = e.expiry;
+        const idx = this._indexForHash(entry.hash);
+        entry.next = this._buckets[idx];
+        this._buckets[idx] = entry;
+        this._size++;
+      }
+    } catch (err) {
+      console.error('Failed to load persistence file:', err);
+    }
+  }
+
+  // ---------------- Internal ----------------
   _cleanupExpired() {
     for (const head of this._buckets) {
       let prev = null;
@@ -127,6 +169,7 @@ class KVStore {
     return { node: null, prev, idx };
   }
 
+  // ---------------- KVStore API ----------------
   set(key, value, exSeconds = null) {
     const h = fnv1aHash(key);
     const idx = this._indexForHash(h);
@@ -138,7 +181,6 @@ class KVStore {
           if (exSeconds !== null) n.expiry = Date.now() + exSeconds * 1000;
           n.next = cur.next;
           this._buckets[idx] = n;
-
           return true;
         } else {
           cur.value = String(value);
@@ -197,9 +239,7 @@ class KVStore {
     for (const head of this._buckets) {
       let cur = head;
       while (cur) {
-        if (!cur.isExpired() && patternMatch(pattern, cur.key)) {
-          out.push(cur.key);
-        }
+        if (!cur.isExpired()) out.push(cur.key);
         cur = cur.next;
       }
     }
@@ -207,10 +247,8 @@ class KVStore {
   }
 
   mset(pairs) {
-      for (const key in pairs) {
-          this.set(key, pairs[key]);
-      }
-      return 'OK';
+    for (const key in pairs) this.set(key, pairs[key]);
+    return 'OK';
   }
 
   mget(keys) {
@@ -220,7 +258,7 @@ class KVStore {
   incr(key, delta = 1) {
     const curVal = this.get(key);
     let n;
-    if (curVal === null) n = 0 + delta;
+    if (curVal === null) n = delta;
     else {
       if (!/^-?\d+$/.test(curVal)) throw new Error('Value is not an integer');
       n = parseInt(curVal, 10) + delta;
@@ -265,8 +303,7 @@ class KVStore {
 
   persist(key) {
     const { node } = this._findNodeAndPrev(key);
-    if (!node) return 0;
-    if (node.expiry === null) return 0;
+    if (!node || node.expiry === null) return 0;
     node.expiry = null;
     return 1;
   }
@@ -290,121 +327,5 @@ class KVStore {
   }
 }
 
-function printHelp() {
-  console.log(`Commands:
-  SET key value [EX seconds]
-  GET key
-  DEL key
-  EXISTS key
-  KEYS pattern
-  MSET k1 v1 k2 v2 ...
-  MGET k1 k2 ...
-  INCR key
-  DECR key
-  APPEND key suffix
-  RENAME oldKey newKey
-  EXPIRE key seconds
-  TTL key
-  PERSIST key
-  DBSIZE
-  FLUSHALL
-  HELP
-  QUIT / EXIT
-`);
-}
-
-function parseAndRun(store, line) {
-  const parts = line.trim().match(/"[^"]*"|'[^']*'|\S+/g) || [];
-  const args = parts.map(s => {
-    if ((s.startsWith('"') && s.endsWith('"')) || (s.startsWith("'") && s.endsWith("'")))
-      return s.slice(1, -1);
-    return s;
-  });
-  if (args.length === 0) return;
-  const cmd = args[0].toUpperCase();
-  try {
-    switch (cmd) {
-      case 'SET': {
-        if (args.length < 3) { console.log('ERR wrong number of arguments for SET'); break; }
-        let ex = null;
-        if (args.length >= 5 && args[3].toUpperCase() === 'EX') ex = parseInt(args[4], 10);
-        store.set(args[1], args[2], ex);
-        console.log('OK');
-        break;
-      }
-      case 'GET': {
-        console.log(store.get(args[1]));
-        break;
-      }
-      case 'DEL': {
-        console.log(store.del(args[1]));
-        break;
-      }
-      case 'EXISTS': {
-        console.log(store.exists(args[1]));
-        break;
-      }
-      case 'KEYS': {
-        const pat = args[1] || '*';
-        console.log(store.keys(pat));
-        break;
-      }
-      case 'MSET': {
-        const res = store.mset(args.slice(1));
-        console.log(res);
-        break;
-      }
-      case 'MGET': {
-        console.log(store.mget(args.slice(1)));
-        break;
-      }
-      case 'INCR': {
-        console.log(store.incr(args[1]));
-        break;
-      }
-      case 'DECR': {
-        console.log(store.decr(args[1]));
-        break;
-      }
-      case 'APPEND': {
-        console.log(store.append(args[1], args[2] || ''));
-        break;
-      }
-      case 'RENAME': {
-        const r = store.rename(args[1], args[2]);
-        if (r instanceof Error) console.log(r.message); else console.log(r);
-        break;
-      }
-      case 'EXPIRE': {
-        console.log(store.expire(args[1], parseInt(args[2], 10)));
-        break;
-      }
-      case 'TTL': {
-        console.log(store.ttl(args[1]));
-        break;
-      }
-      case 'PERSIST': {
-        console.log(store.persist(args[1]));
-        break;
-      }
-      case 'DBSIZE': {
-        console.log(store.dbsize());
-        break;
-      }
-      case 'FLUSHALL': {
-        console.log(store.flushAll());
-        break;
-      }
-      case 'HELP': printHelp(); break;
-      case 'QUIT':
-      case 'EXIT':
-        console.log('Bye'); process.exit(0); break;
-      default:
-        console.log('ERR unknown command. Type HELP');
-    }
-  } catch (err) {
-    console.log('ERR', err.message || err);
-  }
-}
-
 module.exports = { KVStore };
+
