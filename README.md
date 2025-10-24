@@ -45,14 +45,7 @@ node server.js
 ##  Usage
 
 The server listens for TCP connections on localhost:8000.
-
-### Connecting with netcat
-
-You can test basic commands using the netcat utility:
-
-nc localhost 8000  
-  
-  
+ 
 
 ### Protocol Interaction
 
@@ -70,21 +63,28 @@ mykey
 $5  
 hello  
   
-### Output Screebshots
+### Output Screenshots
 
 <img width="669" height="424" alt="Screenshot 2025-10-17 at 5 28 05 PM" src="https://github.com/user-attachments/assets/a1692600-4a1c-4e68-95d5-85307cd5ef22" />
 
+---
+
 <img width="525" height="90" alt="Screenshot 2025-10-18 at 5 01 59 PM" src="https://github.com/user-attachments/assets/98ebfb32-a9ae-4481-96a9-2154fed34352" />
 
-<img width="1470" height="956" alt="Screenshot 2025-10-18 at 5 05 20 PM" src="https://github.com/user-attachments/assets/350394f0-7967-4954-92cd-152596a5957a" />
+---
+
+<img width="2366" height="1396" alt="image" src="https://github.com/user-attachments/assets/c5960dac-d366-4765-9b16-86db0e25c92b" />
+
+---
 
 <img width="493" height="400" alt="Screenshot 2025-10-19 at 2 44 58 PM" src="https://github.com/user-attachments/assets/d53adb74-8143-40db-bc7f-f27b6b80990e" />
+
+---
 
 <img width="400" height="339" alt="Screenshot 2025-10-19 at 10 08 48 PM" src="https://github.com/user-attachments/assets/53d3563b-6652-4e48-a436-6aa1490bbf61" />
 
 
-
-## 📜 Supported Commands
+## Supported Commands
 
 The server implements a wide range of commands across several categories:
 
@@ -118,3 +118,19 @@ The server implements a wide range of commands across several categories:
 | parser.js | Protocol Decoding | (Assumed/Required for functionality) Logic to parse the raw byte stream from the socket, transforming the RESP format into executable command arrays (['SET', 'key', 'value']). |
 | encoder.js | Protocol Encoding | (Assumed/Required for functionality) Logic to format responses (strings, numbers, arrays, or errors) into the correct RESP byte format for transmission back to the client. |
 | dump.json | Persistence File | The file where the entire in-memory dataset is asynchronously saved for durability. |
+
+## Key Takeaways
+
+This project served as a comprehensive exercise in building highly concurrent and performant systems by focusing on the underlying mechanisms:
+
+Concurrency without Threads: The custom implementation of the event loop demonstrates how non-blocking I/O can manage numerous client connections using a single thread, mirroring Node.js's core philosophy.
+
+Data Structure Performance: Building a custom hash map with automatic rehashing highlights the importance of load factor management and collision resolution (separate chaining) for maintaining $O(1)$ average-case performance under dynamic load.
+
+Decoupling I/O: The use of a Worker Thread for persistence successfully decouples the CPU-bound disk write operation from the main application logic, ensuring that the server remains responsive to client requests at all times.
+
+Protocol Implementation: Implementing the RESP parser and encoder provides deep insight into how serialization protocols define client-server communication in high-speed, networked applications.
+
+## Conclusion
+
+This project is a fully functional, custom-built key-value store that satisfies all requirements from Phase 1 (Foundations) through Phase 5 (Persistence). It is a robust demonstration of advanced Node.js and system programming concepts, offering a solid foundation for further exploration into distributed systems and in-memory caching.
