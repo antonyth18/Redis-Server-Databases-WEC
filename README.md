@@ -27,9 +27,10 @@ This implementation goes beyond standard usage of Node.js libraries by building 
 
 1.  Clone the repository:  
     git clone https://github.com/antonyth18/Redis-Server-Databases-WEC.git/
+    
     cd Redis-Server-Databases-WEC 
       
-2.  The project relies solely on built-in Node.js modules (net, fs, worker\_threads). No external npm install is required.
+3.  The project relies solely on built-in Node.js modules (net, fs, worker\_threads). No external npm install is required.
     
 
 
