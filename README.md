@@ -133,6 +133,9 @@ The server implements a wide range of commands across several categories:
         *   **TTL Expiration:** Active expiry is handled via non-blocking background intervals (`setInterval`), scanning and pruning expired keys without halting incoming read/write requests.
 *   **Implemented RESP protocol compatibility for seamless interaction with Redis clients.**
     *   **Justification:** The project implements a custom parser (`protocol/parser.js`) and encoder (`protocol/encoder.js`) that adheres to the REdis Serialization Protocol (RESP). This allows standard tools like `redis-cli`, `redis-benchmark`, and native language clients to connect and execute commands out-of-the-box.
+ 
+<img width="1534" height="264" alt="image" src="https://github.com/user-attachments/assets/e105b55e-92f2-4332-9d55-b668113afa1f" />
+
 
 ## Key Takeaways
 
